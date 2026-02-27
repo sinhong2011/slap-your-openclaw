@@ -14,7 +14,7 @@ pub struct Config {
     pub mqtt_port: u16,
 
     /// MQTT publish topic
-    #[arg(long, env = "MQTT_TOPIC", default_value = "openclaw/slap/inbound")]
+    #[arg(long, env = "MQTT_TOPIC", default_value = "openclaw/inbound")]
     pub mqtt_topic: String,
 
     /// Cooldown between events in milliseconds
@@ -35,7 +35,7 @@ mod tests {
         let config = Config::try_parse_from(["slap-your-openclaw"]).unwrap();
         assert_eq!(config.mqtt_host, "localhost");
         assert_eq!(config.mqtt_port, 1883);
-        assert_eq!(config.mqtt_topic, "openclaw/slap/inbound");
+        assert_eq!(config.mqtt_topic, "openclaw/inbound");
         assert_eq!(config.cooldown_ms, 500);
         assert_eq!(config.min_level, 3);
     }

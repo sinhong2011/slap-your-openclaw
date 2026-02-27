@@ -66,7 +66,7 @@ sudo ./target/release/slap-your-openclaw --mqtt-topic my/topic --cooldown 1000
 ```
 --mqtt-host <HOST>     MQTT broker host [env: MQTT_HOST] [default: localhost]
 --mqtt-port <PORT>     MQTT broker port [env: MQTT_PORT] [default: 1883]
---mqtt-topic <TOPIC>   MQTT publish topic [env: MQTT_TOPIC] [default: openclaw/slap/inbound]
+--mqtt-topic <TOPIC>   MQTT publish topic [env: MQTT_TOPIC] [default: openclaw/inbound]
 --cooldown <MS>        Cooldown between events in milliseconds [env: SLAP_COOLDOWN] [default: 500]
 --min-level <1-6>      Minimum severity level to publish [env: SLAP_MIN_LEVEL] [default: 3]
 ```
@@ -97,7 +97,7 @@ The `text` field starts with `SLAP`, `SHAKE`, or `UNKNOWN` depending on the dete
 
 2. Subscribe to the topic in one terminal:
    ```bash
-   mosquitto_sub -t "openclaw/slap/inbound" -v
+   mosquitto_sub -t "openclaw/inbound" -v
    ```
 
 3. Run the detector in another terminal:
