@@ -1,5 +1,10 @@
+mod config;
 mod detector;
 
+use clap::Parser;
+use config::Config;
+
 fn main() {
-    println!("slap-your-openclaw: not yet implemented");
+    let config = Config::parse();
+    println!("slap-your-openclaw: config={config:?}");
 }
