@@ -38,7 +38,8 @@ pub struct Event {
     pub sources: Vec<String>,
 }
 
-/// Sample rate in Hz (after decimation).
+/// Sample rate in Hz (after decimation). Used in tests.
+#[cfg(test)]
 const FS: usize = 100;
 
 /// High-pass filter alpha for gravity removal.
@@ -186,7 +187,7 @@ impl Detector {
 
         // Peak / MAD
         self.peak_buf.push(mag);
-        if self.peak_buf.len() >= 50 && self.sample_count % 10 == 0 {
+        if self.peak_buf.len() >= 50 && self.sample_count.is_multiple_of(10) {
             let buf = self.peak_buf.slice();
             let mut sorted = buf.clone();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -230,7 +231,9 @@ impl Detector {
             Severity::ChocMoyen
         } else if unique.contains(&"PEAK".to_string()) && amp > 0.005 {
             Severity::MicroChoc
-        } else if (unique.contains(&"STA/LTA".to_string()) || unique.contains(&"CUSUM".to_string())) && amp > 0.003 {
+        } else if (unique.contains(&"STA/LTA".to_string()) || unique.contains(&"CUSUM".to_string()))
+            && amp > 0.003
+        {
             Severity::Vibration
         } else if amp > 0.001 {
             Severity::VibLegere
@@ -248,11 +251,6 @@ impl Detector {
         if self.events.len() > 500 {
             self.events.drain(..self.events.len() - 500);
         }
-    }
-
-    /// Take the latest event if any new events exist since last call.
-    pub fn take_latest_event(&mut self) -> Option<Event> {
-        self.events.pop()
     }
 
     /// Drain all events since last call.
@@ -280,10 +278,15 @@ mod tests {
         feed_gravity(&mut det, FS * 5);
         let events = det.drain_events();
         // Should have very few or no significant events
-        let significant: Vec<_> = events.iter()
+        let significant: Vec<_> = events
+            .iter()
             .filter(|e| e.severity >= Severity::Vibration)
             .collect();
-        assert!(significant.is_empty(), "No significant events expected on stationary data, got {}", significant.len());
+        assert!(
+            significant.is_empty(),
+            "No significant events expected on stationary data, got {}",
+            significant.len()
+        );
     }
 
     #[test]
@@ -307,7 +310,10 @@ mod tests {
         }
 
         let events = det.drain_events();
-        assert!(!events.is_empty(), "Should detect at least one event from spike");
+        assert!(
+            !events.is_empty(),
+            "Should detect at least one event from spike"
+        );
     }
 
     #[test]
@@ -332,10 +338,11 @@ mod tests {
         }
 
         let events = det.drain_events();
-        let max_severity = events.iter()
-            .map(|e| e.severity)
-            .max();
-        assert!(max_severity.is_some(), "Should detect events from major impact");
+        let max_severity = events.iter().map(|e| e.severity).max();
+        assert!(
+            max_severity.is_some(),
+            "Should detect events from major impact"
+        );
         // A 2g spike should trigger multiple detectors → high severity
         assert!(
             max_severity.unwrap() >= Severity::MicroChoc,

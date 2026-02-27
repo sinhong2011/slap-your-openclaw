@@ -2,7 +2,7 @@ use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use crate::detector::{self, Severity};
+use crate::detector;
 
 /// MQTT event payload matching OpenClaw inbound format.
 #[derive(Debug, Serialize)]
@@ -37,11 +37,7 @@ pub struct Publisher {
 impl Publisher {
     /// Connect to MQTT broker and return a Publisher handle.
     /// Spawns a background tokio task for the MQTT event loop.
-    pub fn connect(
-        host: &str,
-        port: u16,
-        topic: String,
-    ) -> Result<Self, String> {
+    pub fn connect(host: &str, port: u16, topic: String) -> Result<Self, String> {
         let mut opts = MqttOptions::new("slap-your-openclaw", host, port);
         opts.set_keep_alive(std::time::Duration::from_secs(30));
 
@@ -84,8 +80,8 @@ impl Publisher {
     /// Publish a slap event.
     pub fn publish(&self, event: &detector::Event) -> Result<(), String> {
         let payload = SlapPayload::from_event(event);
-        let json = serde_json::to_string(&payload)
-            .map_err(|e| format!("JSON serialize error: {e}"))?;
+        let json =
+            serde_json::to_string(&payload).map_err(|e| format!("JSON serialize error: {e}"))?;
         self.tx
             .send(json)
             .map_err(|e| format!("MQTT channel send error: {e}"))?;
@@ -96,7 +92,7 @@ impl Publisher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::detector;
+    use crate::detector::{self, Severity};
 
     #[test]
     fn test_slap_payload_format() {
@@ -125,6 +121,9 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["senderId"], "slap-detector");
         assert!(parsed["text"].as_str().unwrap().contains("Level 4"));
-        assert!(parsed["correlationId"].as_str().unwrap().starts_with("slap-"));
+        assert!(parsed["correlationId"]
+            .as_str()
+            .unwrap()
+            .starts_with("slap-"));
     }
 }

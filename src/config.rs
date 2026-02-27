@@ -44,12 +44,18 @@ mod tests {
     fn test_custom_config() {
         let config = Config::try_parse_from([
             "slap-your-openclaw",
-            "--mqtt-host", "broker.local",
-            "--mqtt-port", "8883",
-            "--mqtt-topic", "custom/topic",
-            "--cooldown", "1000",
-            "--min-level", "5",
-        ]).unwrap();
+            "--mqtt-host",
+            "broker.local",
+            "--mqtt-port",
+            "8883",
+            "--mqtt-topic",
+            "custom/topic",
+            "--cooldown",
+            "1000",
+            "--min-level",
+            "5",
+        ])
+        .unwrap();
         assert_eq!(config.mqtt_host, "broker.local");
         assert_eq!(config.mqtt_port, 8883);
         assert_eq!(config.mqtt_topic, "custom/topic");
@@ -59,10 +65,7 @@ mod tests {
 
     #[test]
     fn test_invalid_min_level() {
-        let result = Config::try_parse_from([
-            "slap-your-openclaw",
-            "--min-level", "7",
-        ]);
+        let result = Config::try_parse_from(["slap-your-openclaw", "--min-level", "7"]);
         assert!(result.is_err());
     }
 }

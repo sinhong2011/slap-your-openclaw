@@ -1,3 +1,3 @@
 pub mod iokit;
 
-pub use iokit::{start_sensor, Sample, SensorRing};
+pub use iokit::start_sensor;

@@ -45,7 +45,8 @@ impl SensorRing {
             // Read total count
             let total = u64::from_le_bytes(
                 std::slice::from_raw_parts(ring.add(4), 8)
-                    .try_into().unwrap()
+                    .try_into()
+                    .unwrap(),
             );
 
             let n_new = (total as i64 - self.last_total as i64).max(0) as usize;
@@ -54,10 +55,8 @@ impl SensorRing {
             }
             let n_new = n_new.min(RING_CAP);
 
-            let idx = u32::from_le_bytes(
-                std::slice::from_raw_parts(ring, 4)
-                    .try_into().unwrap()
-            ) as usize;
+            let idx = u32::from_le_bytes(std::slice::from_raw_parts(ring, 4).try_into().unwrap())
+                as usize;
 
             let start = (idx as isize - n_new as isize).rem_euclid(RING_CAP as isize) as usize;
             let mut samples = Vec::with_capacity(n_new);
@@ -66,13 +65,19 @@ impl SensorRing {
                 let pos = (start + i) % RING_CAP;
                 let off = RING_HEADER + pos * RING_ENTRY;
                 let x = i32::from_le_bytes(
-                    std::slice::from_raw_parts(ring.add(off), 4).try_into().unwrap()
+                    std::slice::from_raw_parts(ring.add(off), 4)
+                        .try_into()
+                        .unwrap(),
                 );
                 let y = i32::from_le_bytes(
-                    std::slice::from_raw_parts(ring.add(off + 4), 4).try_into().unwrap()
+                    std::slice::from_raw_parts(ring.add(off + 4), 4)
+                        .try_into()
+                        .unwrap(),
                 );
                 let z = i32::from_le_bytes(
-                    std::slice::from_raw_parts(ring.add(off + 8), 4).try_into().unwrap()
+                    std::slice::from_raw_parts(ring.add(off + 8), 4)
+                        .try_into()
+                        .unwrap(),
                 );
                 samples.push(Sample {
                     x: x as f64 / ACCEL_SCALE,
@@ -97,7 +102,10 @@ pub fn start_sensor() -> Result<SensorRing, String> {
     unsafe {
         let ret = iokit_sensor_init();
         if ret != 0 {
-            return Err("Failed to initialize IOKit HID sensor. Is this Apple Silicon? Running as root?".into());
+            return Err(
+                "Failed to initialize IOKit HID sensor. Is this Apple Silicon? Running as root?"
+                    .into(),
+            );
         }
     }
 
@@ -107,7 +115,9 @@ pub fn start_sensor() -> Result<SensorRing, String> {
     std::thread::Builder::new()
         .name("iokit-sensor".into())
         .spawn(move || {
-            unsafe { iokit_sensor_run(); }
+            unsafe {
+                iokit_sensor_run();
+            }
             running_clone.store(false, Ordering::Relaxed);
         })
         .map_err(|e| format!("Failed to spawn sensor thread: {e}"))?;
