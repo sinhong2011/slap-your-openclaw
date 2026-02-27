@@ -30,10 +30,32 @@ impl Severity {
     }
 }
 
+/// Kind of motion detected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventKind {
+    /// Short impulsive impact (< 100ms STA/LTA activation)
+    Slap,
+    /// Sustained oscillation (> 200ms STA/LTA activation)
+    Shake,
+    /// Ambiguous or no STA/LTA duration data
+    Unknown,
+}
+
+impl EventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Slap => "SLAP",
+            Self::Shake => "SHAKE",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+}
+
 /// A detected vibration/impact event.
 #[derive(Debug, Clone)]
 pub struct Event {
     pub severity: Severity,
+    pub kind: EventKind,
     pub amplitude: f64,
     pub sources: Vec<String>,
 }
@@ -62,6 +84,7 @@ pub struct Detector {
     sta_lta_on: [f64; 3],
     sta_lta_off: [f64; 3],
     sta_lta_active: [bool; 3],
+    sta_lta_active_since: [f64; 3],
 
     // CUSUM
     cusum_pos: f64,
@@ -96,6 +119,7 @@ impl Detector {
             sta_lta_on: [3.0, 2.5, 2.0],
             sta_lta_off: [1.5, 1.3, 1.2],
             sta_lta_active: [false; 3],
+            sta_lta_active_since: [0.0; 3],
             cusum_pos: 0.0,
             cusum_neg: 0.0,
             cusum_mu: 0.0,
@@ -140,6 +164,7 @@ impl Detector {
             let was = self.sta_lta_active[i];
             if ratio > self.sta_lta_on[i] && !was {
                 self.sta_lta_active[i] = true;
+                self.sta_lta_active_since[i] = t_now;
                 detections.push("STA/LTA");
             } else if ratio < self.sta_lta_off[i] {
                 self.sta_lta_active[i] = false;
@@ -208,13 +233,13 @@ impl Detector {
         // Classify if any detections and enough time since last event
         if !detections.is_empty() && (t_now - self.last_evt_t) > 0.01 {
             self.last_evt_t = t_now;
-            self.classify(&detections, mag);
+            self.classify(&detections, mag, t_now);
         }
 
         mag
     }
 
-    fn classify(&mut self, sources: &[&str], amp: f64) {
+    fn classify(&mut self, sources: &[&str], amp: f64, t_now: f64) {
         // Deduplicate sources
         let mut unique: Vec<String> = Vec::new();
         for &s in sources {
@@ -241,8 +266,12 @@ impl Detector {
             Severity::MicroVib
         };
 
+        // Determine event kind from STA/LTA activation duration
+        let kind = self.determine_kind(t_now);
+
         let event = Event {
             severity,
+            kind,
             amplitude: amp,
             sources: unique,
         };
@@ -250,6 +279,35 @@ impl Detector {
         self.events.push(event);
         if self.events.len() > 500 {
             self.events.drain(..self.events.len() - 500);
+        }
+    }
+
+    /// Determine if the current disturbance is a slap or shake based on
+    /// how long any STA/LTA channel has been continuously active.
+    fn determine_kind(&self, t_now: f64) -> EventKind {
+        let mut max_duration: f64 = 0.0;
+        let mut any_active = false;
+
+        for i in 0..3 {
+            if self.sta_lta_active[i] {
+                any_active = true;
+                let dur = t_now - self.sta_lta_active_since[i];
+                if dur > max_duration {
+                    max_duration = dur;
+                }
+            }
+        }
+
+        if !any_active {
+            return EventKind::Unknown;
+        }
+
+        if max_duration < 0.1 {
+            EventKind::Slap
+        } else if max_duration > 0.2 {
+            EventKind::Shake
+        } else {
+            EventKind::Unknown
         }
     }
 
@@ -374,5 +432,82 @@ mod tests {
     fn test_severity_as_str() {
         assert_eq!(Severity::ChocMajeur.as_str(), "CHOC_MAJEUR");
         assert_eq!(Severity::MicroVib.as_str(), "MICRO_VIB");
+    }
+
+    #[test]
+    fn test_event_kind_as_str() {
+        assert_eq!(EventKind::Slap.as_str(), "SLAP");
+        assert_eq!(EventKind::Shake.as_str(), "SHAKE");
+        assert_eq!(EventKind::Unknown.as_str(), "UNKNOWN");
+    }
+
+    #[test]
+    fn test_short_spike_classified_as_slap() {
+        let mut det = Detector::new();
+        // Warm up with 3 seconds of gravity
+        feed_gravity(&mut det, FS * 3);
+        det.drain_events();
+
+        // Inject a very short sharp spike (4 samples = 40ms at 100Hz)
+        let t_base = 3.0;
+        det.process(1.5, 1.0, -0.2, t_base);
+        det.process(2.0, 1.5, 0.0, t_base + 0.01);
+        det.process(1.5, 1.0, -0.3, t_base + 0.02);
+        det.process(0.2, 0.1, -0.9, t_base + 0.03);
+
+        // Immediately return to normal gravity
+        for i in 0..100 {
+            let t = t_base + 0.04 + i as f64 / FS as f64;
+            det.process(0.0, 0.0, -1.0, t);
+        }
+
+        let events = det.drain_events();
+        let slap_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == EventKind::Slap)
+            .collect();
+        // At least some events from the spike should be classified as Slap
+        // (the first detections happen when STA/LTA has been active < 100ms)
+        assert!(
+            !slap_events.is_empty(),
+            "Short spike should produce at least one Slap event, got events: {:?}",
+            events.iter().map(|e| e.kind).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sustained_oscillation_classified_as_shake() {
+        let mut det = Detector::new();
+        // Warm up with 3 seconds of gravity
+        feed_gravity(&mut det, FS * 3);
+        det.drain_events();
+
+        // Inject sustained oscillation for 1 second (100 samples at 100Hz)
+        // This simulates shaking the laptop back and forth
+        let t_base = 3.0;
+        for i in 0..100 {
+            let t = t_base + i as f64 / FS as f64;
+            let phase = (i as f64 * 2.0 * std::f64::consts::PI * 5.0 / FS as f64).sin();
+            let intensity = 0.5 * phase; // 0.5g oscillation at 5Hz
+            det.process(intensity, intensity * 0.3, -1.0 + intensity * 0.1, t);
+        }
+
+        // Return to normal
+        for i in 0..200 {
+            let t = t_base + 1.0 + i as f64 / FS as f64;
+            det.process(0.0, 0.0, -1.0, t);
+        }
+
+        let events = det.drain_events();
+        let shake_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == EventKind::Shake)
+            .collect();
+        // After 200ms+ of sustained oscillation, later events should be Shake
+        assert!(
+            !shake_events.is_empty(),
+            "Sustained oscillation should produce Shake events, got kinds: {:?}",
+            events.iter().map(|e| e.kind).collect::<Vec<_>>()
+        );
     }
 }

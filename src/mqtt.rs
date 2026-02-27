@@ -16,7 +16,8 @@ pub struct SlapPayload {
 impl SlapPayload {
     pub fn from_event(event: &detector::Event) -> Self {
         let text = format!(
-            "SLAP DETECTED! Level {} ({}) - amplitude: {:.4}g",
+            "{} DETECTED! Level {} ({}) - amplitude: {:.4}g",
+            event.kind.as_str(),
             event.severity.level(),
             event.severity.as_str(),
             event.amplitude,
@@ -92,17 +93,19 @@ impl Publisher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::detector::{self, Severity};
+    use crate::detector::{self, EventKind, Severity};
 
     #[test]
     fn test_slap_payload_format() {
         let event = detector::Event {
             severity: Severity::ChocMoyen,
+            kind: EventKind::Slap,
             amplitude: 0.0234,
             sources: vec!["STA/LTA".into(), "CUSUM".into(), "PEAK".into()],
         };
         let payload = SlapPayload::from_event(&event);
         assert_eq!(payload.sender_id, "slap-detector");
+        assert!(payload.text.contains("SLAP DETECTED!"));
         assert!(payload.text.contains("Level 5"));
         assert!(payload.text.contains("CHOC_MOYEN"));
         assert!(payload.text.contains("0.0234g"));
@@ -110,9 +113,23 @@ mod tests {
     }
 
     #[test]
+    fn test_shake_payload_format() {
+        let event = detector::Event {
+            severity: Severity::Vibration,
+            kind: EventKind::Shake,
+            amplitude: 0.004,
+            sources: vec!["STA/LTA".into(), "CUSUM".into()],
+        };
+        let payload = SlapPayload::from_event(&event);
+        assert!(payload.text.contains("SHAKE DETECTED!"));
+        assert!(payload.text.contains("Level 3"));
+    }
+
+    #[test]
     fn test_slap_payload_json() {
         let event = detector::Event {
             severity: Severity::MicroChoc,
+            kind: EventKind::Slap,
             amplitude: 0.008,
             sources: vec!["PEAK".into()],
         };

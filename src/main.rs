@@ -88,7 +88,8 @@ async fn main() {
             }
 
             eprintln!(
-                "slap #{} [{}  amp={:.5}g] sources={:?}",
+                "{} #{} [{}  amp={:.5}g] sources={:?}",
+                event.kind.as_str(),
                 event.severity.level(),
                 event.severity.as_str(),
                 event.amplitude,
