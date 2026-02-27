@@ -714,6 +714,7 @@ dependencies = [
  "cc",
  "chrono",
  "clap",
+ "libc",
  "rumqttc",
  "serde",
  "serde_json",
