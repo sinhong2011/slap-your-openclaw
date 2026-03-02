@@ -2,7 +2,7 @@
 name = "slap-your-openclaw"
 version = "0.1.0"
 edition = "2021"
-description = "Detect laptop slaps via Apple Silicon accelerometer, trigger OpenClaw agent events"
+description = "slap-your-openclaw - Detect MacBook slaps and trigger OpenClaw roast events"
 license = "MIT"
 
 [[bin]]

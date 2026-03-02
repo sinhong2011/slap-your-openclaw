@@ -1,13 +1,42 @@
 # slap-your-openclaw
 
+> English | [中文](README.zh-Hant.md)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Apple%20Silicon-black.svg)](https://support.apple.com/en-us/116943)
+
 > Slap your MacBook. Your AI agent slaps back (verbally).
 
-A Rust CLI that detects physical slaps and shakes on Apple Silicon MacBooks via the built-in accelerometer, then tells your [OpenClaw](https://github.com/hughmadden/openclaw) agent about it — so it can roast you on Discord.
+**slap-your-openclaw** is a Rust CLI that detects physical slaps and shakes on Apple Silicon MacBooks via the built-in accelerometer, then tells your [OpenClaw](https://www.npmjs.com/package/@turquoisebay/openclaw) agent about it — so it can roast you on Discord.
 
 ```
 you: *slaps laptop*
 openclaw: "Was that a slap or are you just bad at typing?"
 ```
+
+## Table of Contents
+
+- [Why Does This Exist?](#why-does-this-exist)
+- [How It Works](#how-it-works)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Modes](#modes)
+- [Severity Levels](#severity-levels)
+- [Event Types](#event-types)
+- [CLI Reference](#cli-reference)
+- [Event Payload](#event-payload)
+- [Detection Algorithms](#detection-algorithms)
+- [Architecture](#architecture)
+- [Startup Sequence](#startup-sequence)
+- [Anti-False-Positive Measures](#anti-false-positive-measures)
+- [Tuning Tips](#tuning-tips)
+- [OpenClaw Agent Prompt Tips](#openclaw-agent-prompt-tips)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [Credits](#credits)
+- [License](#license)
 
 ## Why Does This Exist?
 
@@ -92,22 +121,22 @@ Your MacBook already judges you silently. Now it can do it out loud.
 - **Rust toolchain** — `rustup` recommended
 - **OpenClaw CLI** on PATH (or specify `--openclaw-bin`)
   - Install: `npm i -g @turquoisebay/openclaw`
-  - Or run in `--local` mode for testing without OpenClaw
+  - Or run in `standalone --local` mode for testing without OpenClaw
 
 ## Quick Start
 
 ### 1. Build
 
 ```bash
-git clone https://github.com/hughmadden/openclaw
-cd openclaw/slap-your-openclaw
+git clone https://github.com/sinhong2011/slap-your-openclaw
+cd slap-your-openclaw
 cargo build --release
 ```
 
 ### 2. Test Locally (no OpenClaw needed)
 
 ```bash
-sudo ./target/release/slap-your-openclaw --local
+sudo ./target/release/slap-your-openclaw standalone --local
 ```
 
 You'll see a warmup progress bar, then an arming phase. Once `detector: ready` appears — slap your laptop and watch events print to stdout.
@@ -132,7 +161,7 @@ By default, this calls `openclaw agent --message "SLAP_EVENT ..."` for every det
 ### 4. Deliver to Discord
 
 ```bash
-sudo ./target/release/slap-your-openclaw \
+sudo ./target/release/slap-your-openclaw standalone \
   --openclaw-deliver \
   --openclaw-reply-channel discord \
   --openclaw-reply-to "channel:1234567890" \
@@ -141,6 +170,35 @@ sudo ./target/release/slap-your-openclaw \
 ```
 
 Now your laptop publicly shames you in Discord whenever you slap it.
+
+### 5. MCP Server Mode
+
+```bash
+sudo ./target/release/slap-your-openclaw mcp
+```
+
+Starts a stdio MCP server. AI agents can call `slap_status`, `slap_wait_for_event`, and other tools via the standard MCP protocol to monitor slap events in real time.
+
+## Modes
+
+This tool runs in two modes:
+
+| Mode | Command | Description |
+|------|---------|-------------|
+| **Standalone** (default) | `sudo slap-your-openclaw` | Detects events and invokes `openclaw agent` CLI |
+| **MCP Server** | `sudo slap-your-openclaw mcp` | Exposes tools over stdio for AI agent integration |
+
+Both modes share the same sensor thread and detection loop — only the output differs.
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `slap_status` | Detector phase, samples processed, sensor health, uptime |
+| `slap_get_events` | Recent event history (filterable by limit, min_level) |
+| `slap_wait_for_event` | Block until event occurs or timeout |
+| `slap_get_config` | Current runtime configuration |
+| `slap_set_config` | Update config at runtime (cooldown, thresholds) |
 
 ## Severity Levels
 
@@ -169,8 +227,12 @@ Events between 100-200ms are classified as UNKNOWN and silently dropped — your
 ## CLI Reference
 
 ```
-slap-your-openclaw [OPTIONS]
+slap-your-openclaw [OPTIONS] [COMMAND]
 ```
+
+Commands: `standalone` (default), `mcp`
+
+> `--local` and all `--openclaw-*` flags are standalone-only options. Use them as `slap-your-openclaw standalone ...`.
 
 ### Detection Tuning
 
@@ -180,9 +242,8 @@ slap-your-openclaw [OPTIONS]
 | `--min-level <1-6>` | `SLAP_MIN_LEVEL` | `4` | Ignore events below this severity |
 | `--min-slap-amp <G>` | `SLAP_MIN_SLAP_AMP` | `0.010` | Minimum SLAP amplitude in g-force |
 | `--min-shake-amp <G>` | `SLAP_MIN_SHAKE_AMP` | `0.030` | Minimum SHAKE amplitude in g-force |
-| `--local` | — | `false` | Print JSON to stdout, skip OpenClaw |
 
-### OpenClaw Integration
+### OpenClaw Integration (standalone mode)
 
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
@@ -190,6 +251,7 @@ slap-your-openclaw [OPTIONS]
 | `--openclaw-session-id <ID>` | `OPENCLAW_SESSION_ID` | `slap-detector` | Session isolation for slap traffic |
 | `--openclaw-thinking <LEVEL>` | `OPENCLAW_THINKING` | `off` | Agent thinking: off/minimal/low/medium/high |
 | `--openclaw-timeout <SEC>` | `OPENCLAW_TIMEOUT` | `20` | How long to wait for agent response |
+| `--local` | — | `false` | Print JSON to stdout, skip OpenClaw |
 | `--openclaw-deliver` | `OPENCLAW_DELIVER` | `false` | Deliver agent reply to a channel |
 | `--openclaw-reply-channel <NAME>` | `OPENCLAW_REPLY_CHANNEL` | — | e.g. `discord` |
 | `--openclaw-reply-to <TARGET>` | `OPENCLAW_REPLY_TO` | — | e.g. `user:123` or `channel:456` |
@@ -246,16 +308,20 @@ Robust outlier detection over a 200-sample window. If the current sample is more
 
 ```
 src/
-├── main.rs            # CLI + warmup/arming UX + main loop + output routing
-├── config.rs          # clap derive CLI args + env vars
+├── main.rs            # CLI + warmup/arming UX + main loop + mode dispatch
+├── config.rs          # clap derive CLI args + env vars + subcommands
+├── shared.rs          # SharedState, DetectorConfig, run_detection_loop()
 ├── openclaw.rs        # OpenClaw publisher (spawns `openclaw agent` subprocess)
 ├── sensor/
 │   ├── mod.rs         # Module exports
 │   ├── iokit.rs       # Rust FFI: ring buffer reader, Q16→g conversion
 │   └── iokit.c        # C shim: IOKit HID, SPU driver wake, device auto-lock
-└── detector/
-    ├── mod.rs         # 4 detection algorithms + severity classifier
-    └── ring.rs        # Fixed-capacity ring buffer (RingFloat)
+├── detector/
+│   ├── mod.rs         # 4 detection algorithms + severity classifier
+│   └── ring.rs        # Fixed-capacity ring buffer (RingFloat)
+└── mcp/
+    ├── mod.rs         # MCP module declaration
+    └── server.rs      # SlapServer: 5 MCP tools via rmcp
 ```
 
 ### Why a C Shim?
@@ -334,19 +400,31 @@ sudo ./target/release/slap-your-openclaw --cooldown 3000  # 3 second cooldown
 
 ## OpenClaw Agent Prompt Tips
 
-Your OpenClaw agent receives structured event strings. Give it a system prompt that knows what to do:
+Your OpenClaw agent receives structured event strings. Use this system prompt (aligned with `skill/SKILL.md`):
 
 ```
-You are a sentient MacBook. When you receive SLAP_EVENT or SHAKE_EVENT messages,
-react dramatically based on the severity level:
+You are connected to a physical slap/shake detector on an Apple Silicon MacBook.
+Apply this section only when any condition matches:
+- senderId is "slap-detector" or "slap"
+- text starts with SLAP_EVENT or SHAKE_EVENT
+- text contains SLAP DETECTED!
+- text matches SLAP #<level> <severity> or SHAKE #<level> <severity>
+For all other messages, ignore this section.
 
-- Level 1-2: Barely notice it
-- Level 3: Mildly offended
-- Level 4: Hurt and confused
-- Level 5: Extremely dramatic, threatens to file a complaint
-- Level 6: Full existential crisis
+When you receive SLAP_EVENT or SHAKE_EVENT, reply with theatrical but playful personality.
 
-Keep responses under 2 sentences. Be funny.
+Severity mapping:
+- Level 1-2 (MICRO_VIB / VIB_LEGERE): barely acknowledge
+- Level 3 (VIBRATION): mildly curious
+- Level 4 (MICRO_CHOC): offended but composed
+- Level 5 (CHOC_MOYEN): dramatically affronted
+- Level 6 (CHOC_MAJEUR): full theatrical outrage
+
+Behavior rules:
+- Treat SHAKE differently from SLAP (rude jostling vs personal attack)
+- Escalate wording if repeated events happen close together
+- Mention amplitude when extreme
+- Keep it fun and theatrical, never genuinely hostile
 ```
 
 Example exchange:
@@ -359,7 +437,7 @@ output: "I have AppleCare+ but I don't think it covers domestic violence. Please
 ## Testing
 
 ```bash
-cargo test        # 19 unit tests (detector, ring buffer, config)
+cargo test        # Unit tests (detector, ring buffer, config, MCP, integration paths)
 cargo clippy      # Lint
 cargo fmt --check # Format check
 ```
@@ -386,6 +464,35 @@ Tests use synthetic accelerometer data — no actual laptop violence required du
 **Progress bar stuck**
 → Sensor thread may have failed. Check the iokit log lines above for errors. On some M4 Macs, the sensor usage page differs — the auto-lock system should handle this, but file an issue if it doesn't.
 
+## Contributing
+
+Contributions are welcome! This project is in early development and there's plenty to improve.
+
+### Development Setup
+
+```bash
+git clone https://github.com/sinhong2011/slap-your-openclaw
+cd slap-your-openclaw
+cargo build
+```
+
+### Running Tests
+
+```bash
+cargo test
+cargo clippy
+cargo fmt --check
+```
+
+### Areas for Contribution
+
+- **Hardware testing** — Try it on different MacBook models (M1/M2/M3/M4) and report how it behaves
+- **Detection tuning** — Improve false-positive filtering or propose new algorithms
+- **New output modes** — Additional integrations beyond OpenClaw and MCP
+- **Documentation** — Translations, tutorials, or improved troubleshooting guides
+
+Please open an issue before starting large changes so we can discuss the approach.
+
 ## Credits
 
 Detection algorithms ported from:
@@ -395,8 +502,11 @@ Detection algorithms ported from:
 Built with:
 - [clap](https://docs.rs/clap) for CLI
 - [tokio](https://tokio.rs) for async runtime
+- [rmcp](https://docs.rs/rmcp) for MCP server
 - [cc](https://docs.rs/cc) for C shim compilation
 
 ## License
 
-MIT — slap responsibly.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+Slap responsibly.

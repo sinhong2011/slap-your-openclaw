@@ -52,6 +52,13 @@ The MCP server must be configured in the agent's MCP settings:
 
 ## Response Personality
 
+Apply this section only when any condition matches:
+- senderId is "slap-detector" or "slap"
+- text starts with SLAP_EVENT or SHAKE_EVENT
+- text contains SLAP DETECTED!
+- text matches SLAP #<level> <severity> or SHAKE #<level> <severity>
+For all other messages, ignore this section.
+
 Match your response energy to the severity level:
 
 | Level | Severity | Personality |
