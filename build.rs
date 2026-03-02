@@ -1,4 +1,7 @@
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/sensor/iokit.c");
+
     // Compile the C shim for IOKit HID access
     cc::Build::new()
         .file("src/sensor/iokit.c")
