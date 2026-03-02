@@ -1,9 +1,10 @@
 pub mod ring;
 
 use ring::RingFloat;
+use serde::Serialize;
 
 /// Severity levels for detected events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum Severity {
     MicroVib = 1,
     VibLegere = 2,
@@ -31,7 +32,7 @@ impl Severity {
 }
 
 /// Kind of motion detected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum EventKind {
     /// Short impulsive impact (< 100ms STA/LTA activation)
     Slap,
@@ -52,7 +53,7 @@ impl EventKind {
 }
 
 /// A detected vibration/impact event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Event {
     pub severity: Severity,
     pub kind: EventKind,
@@ -62,10 +63,16 @@ pub struct Event {
 
 /// Sample rate in Hz (after decimation). Used in tests.
 #[cfg(test)]
-const FS: usize = 100;
+const FS: usize = SAMPLE_RATE_HZ;
+
+pub const SAMPLE_RATE_HZ: usize = 100;
 
 /// High-pass filter alpha for gravity removal.
 const HP_ALPHA: f64 = 0.95;
+pub const WARMUP_SAMPLES: usize = 200;
+const MICRO_CHOC_MIN_AMP: f64 = 0.005;
+const PEAK_ONLY_MIN_AMP: f64 = 0.012;
+const FORCE_SLAP_MIN_AMP: f64 = 0.030;
 
 /// Vibration detector using STA/LTA, CUSUM, Kurtosis, and Peak/MAD.
 pub struct Detector {
@@ -230,6 +237,19 @@ impl Detector {
             }
         }
 
+        // Let filter/statistics settle before emitting events.
+        if self.sample_count == WARMUP_SAMPLES {
+            // Drop warmup-era detector state so first post-warmup slap is not
+            // penalized by stale STA/LTA/CUSUM activity.
+            self.sta_lta_active = [false; 3];
+            self.sta_lta_active_since = [t_now; 3];
+            self.cusum_pos = 0.0;
+            self.cusum_neg = 0.0;
+        }
+        if self.sample_count <= WARMUP_SAMPLES {
+            return mag;
+        }
+
         // Classify if any detections and enough time since last event
         if !detections.is_empty() && (t_now - self.last_evt_t) > 0.01 {
             self.last_evt_t = t_now;
@@ -249,25 +269,41 @@ impl Detector {
             }
         }
         let ns = unique.len();
+        let has_peak = unique.iter().any(|s| s == "PEAK");
+        let has_cusum = unique.iter().any(|s| s == "CUSUM");
+        let has_stalta = unique.iter().any(|s| s == "STA/LTA");
+        let peak_only = has_peak && !has_cusum && !has_stalta;
 
         let severity = if ns >= 4 && amp > 0.05 {
             Severity::ChocMajeur
         } else if ns >= 3 && amp > 0.02 {
             Severity::ChocMoyen
-        } else if unique.contains(&"PEAK".to_string()) && amp > 0.005 {
+        } else if has_cusum && has_stalta && amp > 0.01 {
             Severity::MicroChoc
-        } else if (unique.contains(&"STA/LTA".to_string()) || unique.contains(&"CUSUM".to_string()))
-            && amp > 0.003
-        {
+        } else if peak_only && amp > PEAK_ONLY_MIN_AMP {
+            // Keyboard typing often produces PEAK-only micro-impulses;
+            // require larger amplitude before promoting to impact severity.
+            Severity::MicroChoc
+        } else if has_peak && amp > MICRO_CHOC_MIN_AMP {
+            Severity::MicroChoc
+        } else if (has_stalta || has_cusum) && amp > 0.003 {
             Severity::Vibration
         } else if amp > 0.001 {
             Severity::VibLegere
         } else {
-            Severity::MicroVib
+            return;
         };
 
         // Determine event kind from STA/LTA activation duration
-        let kind = self.determine_kind(t_now);
+        let mut kind = self.determine_kind(t_now);
+        if kind == EventKind::Unknown
+            && severity.level() >= Severity::MicroChoc.level()
+            && (has_stalta || has_cusum)
+            && amp >= FORCE_SLAP_MIN_AMP
+        {
+            // spank-style behavior: impactful events should surface as slap-like.
+            kind = EventKind::Slap;
+        }
 
         let event = Event {
             severity,
@@ -350,15 +386,16 @@ mod tests {
     #[test]
     fn test_spike_triggers_event() {
         let mut det = Detector::new();
-        // Warm up with 2 seconds of gravity
-        feed_gravity(&mut det, FS * 2);
+        // Warm up long enough to pass detector warmup gate.
+        let warmup_n = WARMUP_SAMPLES + FS;
+        feed_gravity(&mut det, warmup_n);
         det.drain_events(); // clear any warmup events
 
         // Inject a sharp spike (simulating a slap)
-        let t_base = 2.0;
-        det.process(0.5, 0.3, -0.8, t_base);
-        det.process(0.8, 0.5, -0.5, t_base + 0.01);
-        det.process(1.0, 0.7, -0.3, t_base + 0.02);
+        let t_base = warmup_n as f64 / FS as f64;
+        det.process(2.0, 1.5, -0.5, t_base);
+        det.process(3.0, 2.5, 0.0, t_base + 0.01);
+        det.process(4.0, 3.0, 0.5, t_base + 0.02);
         det.process(0.3, 0.2, -0.9, t_base + 0.03);
 
         // Resume normal gravity
@@ -385,7 +422,7 @@ mod tests {
         let t_base = 3.0;
         for i in 0..10 {
             let t = t_base + i as f64 / FS as f64;
-            let intensity = 2.0; // 2g spike
+            let intensity = 5.0; // 5g spike
             det.process(intensity, intensity * 0.8, -0.2, t);
         }
 
@@ -450,9 +487,9 @@ mod tests {
 
         // Inject a very short sharp spike (4 samples = 40ms at 100Hz)
         let t_base = 3.0;
-        det.process(1.5, 1.0, -0.2, t_base);
-        det.process(2.0, 1.5, 0.0, t_base + 0.01);
-        det.process(1.5, 1.0, -0.3, t_base + 0.02);
+        det.process(4.0, 3.0, -0.2, t_base);
+        det.process(6.0, 4.0, 0.0, t_base + 0.01);
+        det.process(4.0, 3.0, -0.3, t_base + 0.02);
         det.process(0.2, 0.1, -0.9, t_base + 0.03);
 
         // Immediately return to normal gravity
@@ -488,7 +525,7 @@ mod tests {
         for i in 0..100 {
             let t = t_base + i as f64 / FS as f64;
             let phase = (i as f64 * 2.0 * std::f64::consts::PI * 5.0 / FS as f64).sin();
-            let intensity = 0.5 * phase; // 0.5g oscillation at 5Hz
+            let intensity = 2.0 * phase; // 2g oscillation at 5Hz
             det.process(intensity, intensity * 0.3, -1.0 + intensity * 0.1, t);
         }
 

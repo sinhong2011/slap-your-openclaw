@@ -42,52 +42,64 @@ impl SensorRing {
         }
 
         unsafe {
-            // Read total count
-            let total = u64::from_le_bytes(
-                std::slice::from_raw_parts(ring.add(4), 8)
-                    .try_into()
-                    .unwrap(),
-            );
+            // Retry a few times if writer updates ring during our read.
+            for _ in 0..3 {
+                let total_before = u64::from_le_bytes(
+                    std::slice::from_raw_parts(ring.add(4), 8)
+                        .try_into()
+                        .unwrap(),
+                );
 
-            let n_new = (total as i64 - self.last_total as i64).max(0) as usize;
-            if n_new == 0 {
-                return Vec::new();
+                let n_new = (total_before as i64 - self.last_total as i64).max(0) as usize;
+                if n_new == 0 {
+                    return Vec::new();
+                }
+                let n_new = n_new.min(RING_CAP);
+
+                let idx =
+                    u32::from_le_bytes(std::slice::from_raw_parts(ring, 4).try_into().unwrap())
+                        as usize;
+
+                let start = (idx as isize - n_new as isize).rem_euclid(RING_CAP as isize) as usize;
+                let mut samples = Vec::with_capacity(n_new);
+
+                for i in 0..n_new {
+                    let pos = (start + i) % RING_CAP;
+                    let off = RING_HEADER + pos * RING_ENTRY;
+                    let x = i32::from_le_bytes(
+                        std::slice::from_raw_parts(ring.add(off), 4)
+                            .try_into()
+                            .unwrap(),
+                    );
+                    let y = i32::from_le_bytes(
+                        std::slice::from_raw_parts(ring.add(off + 4), 4)
+                            .try_into()
+                            .unwrap(),
+                    );
+                    let z = i32::from_le_bytes(
+                        std::slice::from_raw_parts(ring.add(off + 8), 4)
+                            .try_into()
+                            .unwrap(),
+                    );
+                    samples.push(Sample {
+                        x: x as f64 / ACCEL_SCALE,
+                        y: y as f64 / ACCEL_SCALE,
+                        z: z as f64 / ACCEL_SCALE,
+                    });
+                }
+
+                let total_after = u64::from_le_bytes(
+                    std::slice::from_raw_parts(ring.add(4), 8)
+                        .try_into()
+                        .unwrap(),
+                );
+                if total_after == total_before {
+                    self.last_total = total_before;
+                    return samples;
+                }
             }
-            let n_new = n_new.min(RING_CAP);
 
-            let idx = u32::from_le_bytes(std::slice::from_raw_parts(ring, 4).try_into().unwrap())
-                as usize;
-
-            let start = (idx as isize - n_new as isize).rem_euclid(RING_CAP as isize) as usize;
-            let mut samples = Vec::with_capacity(n_new);
-
-            for i in 0..n_new {
-                let pos = (start + i) % RING_CAP;
-                let off = RING_HEADER + pos * RING_ENTRY;
-                let x = i32::from_le_bytes(
-                    std::slice::from_raw_parts(ring.add(off), 4)
-                        .try_into()
-                        .unwrap(),
-                );
-                let y = i32::from_le_bytes(
-                    std::slice::from_raw_parts(ring.add(off + 4), 4)
-                        .try_into()
-                        .unwrap(),
-                );
-                let z = i32::from_le_bytes(
-                    std::slice::from_raw_parts(ring.add(off + 8), 4)
-                        .try_into()
-                        .unwrap(),
-                );
-                samples.push(Sample {
-                    x: x as f64 / ACCEL_SCALE,
-                    y: y as f64 / ACCEL_SCALE,
-                    z: z as f64 / ACCEL_SCALE,
-                });
-            }
-
-            self.last_total = total;
-            samples
+            Vec::new()
         }
     }
 
