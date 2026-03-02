@@ -1,6 +1,6 @@
 [package]
 name = "slap-your-openclaw"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "slap-your-openclaw - Detect MacBook slaps and trigger OpenClaw roast events"
 license = "MIT"
